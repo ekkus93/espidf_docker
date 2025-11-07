@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 """
-Dockerized ESP-IDF wrapper for Linux & macOS.
+Dockerized wrapper for ESP-IDF idf_tools.py (matches your idf.py UX).
 
-Usage (exactly like native idf.py):
-  idf.py set-target esp32
-  idf.py menuconfig
-  idf.py build
-  idf.py -p /dev/ttyUSB0 -b 921600 flash
-  idf.py monitor
-  idf.py fullclean
-
-Extras:
-  IDF_IMAGE=yourhubuser/esp-idf:5.5-1 idf build
-  idf.py --image yourhubuser/esp-idf:5.5-1 --pull build
-  idf.py --ccache build
-  idf.py --project ~/src/myproj build
-  idf.py -- cmake --version    # run arbitrary tool in the image
+Examples:
+  idf_tools.py --help
+  idf_tools.py install
+  idf_tools.py export --format key-value
+  IDF_IMAGE=espressif/idf:release-v5.5 idf_tools.py list
+  idf_tools.py --pull --project ~/work/tcheck/cv1 export --format key-value
+  # Run arbitrary tool inside the image:
+  idf_tools.py -- cmake --version
 """
 
 import os
@@ -25,9 +19,11 @@ import shutil
 import platform
 import subprocess
 
+# Defaults & constants
 DEFAULT_IMAGE = os.environ.get("IDF_IMAGE", "espressif/idf:release-v5.5")
 WORKDIR_IN_CONTAINER = "/workspace"
-IDF_ENTRY = "idf.py"
+# idf_tools.py lives in the ESP-IDF tree inside the official images here:
+IDF_TOOLS_ENTRY = "/opt/esp/idf/tools/idf_tools.py"
 
 def is_macos():
     return sys.platform == "darwin"
@@ -42,7 +38,7 @@ def run(cmd):
     return subprocess.call(cmd)
 
 def find_serial_devices():
-    """Only meaningful on Linux; macOS Docker can’t pass USB serial."""
+    """Kept for parity with your idf.py; not usually needed for idf_tools.py."""
     if not is_linux():
         return []
     devs = []
@@ -53,14 +49,14 @@ def find_serial_devices():
 
 def parse_args(argv):
     """
-    Supported wrapper flags (consumed here, not passed to idf.py):
-      --image <tag>         override docker image
+    Wrapper flags (consumed here):
+      --image <tag>         override docker image (default from $IDF_IMAGE)
       --pull                docker pull before run
       --no-devices          don’t map /dev/ttyUSB* / /dev/ttyACM*
-      --no-user-map         don’t map uid:gid
-      --ccache              mount host ccache into the container
-      --project <path>      mount specific directory (default: $PWD)
-      --                    everything after goes as raw command (skip idf.py)
+      --no-user-map         don’t map uid:gid (file ownership)
+      --ccache              mount host ccache into container
+      --project <path>      mount this dir as /workspace (default: $PWD)
+      --                    everything after goes as raw command (skip idf_tools)
     """
     image = DEFAULT_IMAGE
     pull = False
@@ -103,34 +99,17 @@ def build_mounts(project_dir, use_ccache):
     mounts = []
     mounts += ["-v", f"{project_dir}:{WORKDIR_IN_CONTAINER}"]
     if use_ccache:
-        # Host ccache directory; adjust container home if your base image uses another user
         ccache_host = os.path.join(os.path.expanduser("~"), ".ccache")
         os.makedirs(ccache_host, exist_ok=True)
-        # Common home paths in Espressif images: /home/esp or /home/esp32 or similar.
-        # We don’t need to know the exact user; ccache path is configurable via env as needed.
         mounts += ["-v", f"{ccache_host}:/home/esp/.ccache"]
     return mounts
-
-def warn_if_flash_on_macos(idf_args, raw_cmd):
-    if not is_macos():
-        return
-    # If running idf.py, check for flash/monitor; if raw command, check general hint
-    tokens = (idf_args if raw_cmd is None else raw_cmd)
-    joined = " ".join(tokens)
-    if any(k in joined.split() for k in ("flash", "app-flash", "erase-flash", "monitor", "dfu", "dfu-flash")):
-        sys.stderr.write(
-            "Note: Docker on macOS cannot pass USB serial devices to Linux containers.\n"
-            "      You can still build in Docker, but for flashing/monitor either:\n"
-            "        - use native esptool.py on macOS, or\n"
-            "        - use a Linux/WSL machine for flashing.\n"
-        )
 
 def main():
     if not docker_exists():
         sys.stderr.write("Error: Docker is not installed or not in PATH.\n")
         sys.exit(1)
 
-    image, pull, pass_devices, user_map, use_ccache, project_dir, raw_cmd, idf_args = parse_args(sys.argv[1:])
+    image, pull, pass_devices, user_map, use_ccache, project_dir, raw_cmd, tool_args = parse_args(sys.argv[1:])
     if project_dir is None:
         project_dir = os.getcwd()
 
@@ -141,31 +120,27 @@ def main():
 
     docker_cmd = ["docker", "run", "--rm", "-it"]
 
-    # Map uid:gid so files created in repo are owned by you (Linux/macOS)
+    # Map uid:gid so files created are owned by the host user
     if user_map and (is_linux() or is_macos()):
         try:
             docker_cmd += ["--user", f"{os.getuid()}:{os.getgid()}"]
         except Exception:
             pass
 
-    # Env passthrough (useful but optional)
+    # Pass through useful env vars (extend if you like)
     for key in ("IDF_GITHUB_ASSETS", "ESPPORT", "ESPBAUD", "IDF_IMAGE"):
         val = os.environ.get(key)
         if val:
             docker_cmd += ["-e", f"{key}={val}"]
 
-    # Mount project (and optional caches)
+    # Mount project & optional caches
     docker_cmd += build_mounts(project_dir, use_ccache)
     docker_cmd += ["-w", WORKDIR_IN_CONTAINER]
 
-    # Serial devices (Linux only)
+    # Serial devices (mostly irrelevant for idf_tools.py, but harmless)
     if pass_devices and is_linux():
         docker_cmd += find_serial_devices()
-
-        # Add host device groups (for example `dialout`) as supplementary groups
-        # inside the container. This helps when the container process runs with
-        # the same numeric UID:GID as the host user but doesn't have the
-        # supplementary groups (so it cannot open /dev/ttyUSB* nodes).
+        # Best-effort supplementary groups for device access
         try:
             gids = set()
             for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*"):
@@ -173,21 +148,17 @@ def main():
                     try:
                         gids.add(os.stat(path).st_gid)
                     except Exception:
-                        # ignore files that vanish or stat failures
                         pass
             for gid in sorted(gids):
                 docker_cmd += ["--group-add", str(gid)]
         except Exception:
-            # best-effort only; if something fails, continue without group-add
             pass
 
-    # Compose final command
     docker_cmd += [image]
-    inner = raw_cmd if raw_cmd else [IDF_ENTRY] + idf_args
-    warn_if_flash_on_macos(idf_args, raw_cmd)
+    inner = raw_cmd if raw_cmd else [IDF_TOOLS_ENTRY] + tool_args
 
-    # Debug: print the command if needed
-    # print(" ".join(shlex.quote(x) for x in docker_cmd + inner))
+    # Debug:
+    # import shlex; print(" ".join(shlex.quote(x) for x in docker_cmd + inner))
 
     sys.exit(run(docker_cmd + inner))
 

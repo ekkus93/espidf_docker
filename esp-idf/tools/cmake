@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""
+cmake wrapper that runs cmake inside the ESP-IDF Docker image.
+
+- Rewrites host paths (-S, -B, --build, etc.) to a mounted prefix (/host).
+- Also rewrites -DNAME=<path> args (e.g. -DSDKCONFIG=/abs/path), stripping any surrounding quotes.
+- Mounts the common ancestor of all used paths at /host.
+- Preserves working directory and file ownership.
+- Forwards env vars (IDF_IMAGE, ESPPORT, ESPBAUD, IDF_GITHUB_ASSETS).
+"""
+
+import os
+import sys
+import shutil
+import subprocess
+from pathlib import Path
+
+DEFAULT_IMAGE = os.environ.get("IDF_IMAGE", "espressif/idf:release-v5.5")
+CONTAINER_MOUNT = "/host"
+#CONTAINER_MOUNT = ""
+
+PATH_FLAGS = {
+    "-S", "-B", "-C",
+    "--build", "--check-build-system", "--install", "--open",
+}
+EQ_PATH_FLAGS = {"--install-prefix"}
+
+def strip_quotes(s: str) -> str:
+    if len(s) >= 2 and ((s[0] == s[-1] == "'") or (s[0] == s[-1] == '"')):
+        return s[1:-1]
+    return s
+
+def is_pathlike(s: str) -> bool:
+    if not s:
+        return False
+    # treat as path if absolute or has a separator or starts with ./ or ../
+    return s.startswith("/") or s.startswith("./") or s.startswith("../") or ("/" in s)
+
+def abspath_from_cwd(p: str, cwd: Path) -> Path:
+    pp = Path(p)
+    return (cwd / pp).resolve() if not pp.is_absolute() else pp.resolve()
+
+def gather_paths(argv, cwd: Path):
+    paths = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in PATH_FLAGS and i + 1 < len(argv):
+            paths.append(abspath_from_cwd(argv[i+1], cwd))
+            i += 2
+            continue
+        if a.startswith("--"):
+            for f in EQ_PATH_FLAGS:
+                if a.startswith(f + "="):
+                    val = a.split("=", 1)[1]
+                    paths.append(abspath_from_cwd(val, cwd))
+                    break
+        else:
+            if a.startswith("-D") and "=" in a:
+                _, raw_val = a.split("=", 1)
+                val = strip_quotes(raw_val)                # <-- strip quotes
+                if is_pathlike(val):
+                    paths.append(abspath_from_cwd(val, cwd))
+        i += 1
+    paths.append(cwd.resolve())
+    return paths
+
+def common_mount_root(abs_paths):
+    if not abs_paths:
+        return Path("/").resolve()
+    root = abs_paths[0]
+    for p in abs_paths[1:]:
+        try:
+            root = Path(os.path.commonpath([str(root), str(p)]))
+        except ValueError:
+            root = Path("/")
+    return root.resolve()
+
+def translate_path(p: Path, host_root: Path) -> str:
+    try:
+        rel = p.resolve().relative_to(host_root)
+        return f"{CONTAINER_MOUNT}/{rel.as_posix()}"
+    except Exception:
+        return str(p)
+
+def translate_arg_paths(argv, cwd: Path, host_root: Path):
+    out = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in PATH_FLAGS and i + 1 < len(argv):
+            raw = argv[i+1]
+            ap = abspath_from_cwd(raw, cwd)
+            out.extend([a, translate_path(ap, host_root)])
+            i += 2
+            continue
+        if a.startswith("--"):
+            rewritten = False
+            for f in EQ_PATH_FLAGS:
+                if a.startswith(f + "="):
+                    key, val = a.split("=", 1)
+                    ap = abspath_from_cwd(val, cwd)
+                    out.append(f"{key}={translate_path(ap, host_root)}")
+                    rewritten = True
+                    break
+            if rewritten:
+                i += 1
+                continue
+        if a.startswith("-D") and "=" in a:
+            k, raw_v = a.split("=", 1)
+            v = strip_quotes(raw_v)                         # <-- strip quotes
+            if is_pathlike(v):
+                ap = abspath_from_cwd(v, cwd)
+                out.append(f"{k}={translate_path(ap, host_root)}")
+            else:
+                out.append(f"{k}={v}")
+            i += 1
+            continue
+        if a == "-H" and i + 1 < len(argv):  # legacy
+            ap = abspath_from_cwd(argv[i+1], cwd)
+            out.extend([a, translate_path(ap, host_root)])
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    return out
+
+def main():
+    if shutil.which("docker") is None:
+        print("Error: docker not found in PATH.", file=sys.stderr)
+        sys.exit(1)
+
+    cwd = Path.cwd()
+    argv = sys.argv[1:]
+
+    abs_paths = gather_paths(argv, cwd)
+    mount_root = common_mount_root(abs_paths)
+
+    try:
+        rel_cwd = cwd.resolve().relative_to(mount_root)
+    except Exception:
+        mount_root = cwd.resolve()
+        rel_cwd = Path("")
+    container_cwd = Path(CONTAINER_MOUNT) / rel_cwd
+
+    args_in_container = translate_arg_paths(argv, cwd, mount_root)
+
+    docker_cmd = [
+        "docker", "run", "--rm", "-it",
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "-v", f"{str(mount_root)}:{CONTAINER_MOUNT}",
+        "-w", str(container_cwd),
+    ]
+    for k in ("IDF_GITHUB_ASSETS", "ESPPORT", "ESPBAUD", "IDF_IMAGE"):
+        v = os.environ.get(k)
+        if v:
+            docker_cmd += ["-e", f"{k}={v}"]
+
+    image = os.environ.get("IDF_IMAGE", DEFAULT_IMAGE)
+    inner = ["cmake"] + args_in_container
+
+    sys.exit(subprocess.call(docker_cmd + [image] + inner))
+
+if __name__ == "__main__":
+    main()

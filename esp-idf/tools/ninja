@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+import os, sys, shutil, subprocess, re
+from pathlib import Path
+
+DEFAULT_IMAGE = os.environ.get("IDF_IMAGE", "espressif/idf:release-v5.5")
+CONTAINER_MOUNT = "/host"
+
+def read_SB_from_build_ninja(build_dir: Path):
+    """Parse -S... and -B... from the RERUN_CMAKE line in build/build.ninja."""
+    bn = build_dir / "build.ninja"
+    if not bn.is_file():
+        return None, None
+    s_pat = re.compile(r"(?:^| )-S(?P<s>\S+)")
+    b_pat = re.compile(r"(?:^| )-B(?P<b>\S+)")
+    for line in bn.read_text(errors="ignore").splitlines():
+        if " RERUN_CMAKE" in line or "--regenerate-during-build" in line:
+            s = s_pat.search(line)
+            b = b_pat.search(line)
+            return (s.group("s") if s else None, b.group("b") if b else None)
+    return None, None
+
+def main():
+    if shutil.which("docker") is None:
+        print("Error: docker not found in PATH.", file=sys.stderr)
+        sys.exit(1)
+
+    cwd = Path.cwd()
+    argv = sys.argv[1:]
+
+    # Guard: miswired cmake flags sent to ninja
+    if any(a in argv for a in ("-G","-S","-B","--build")):
+        print("error: ninja wrapper received CMake options (-G/-S/-B/--build). Check cmake.cmakePath.", file=sys.stderr)
+        sys.exit(2)
+
+    # Parse optional -C <dir>
+    user_C = None
+    args = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "-C" and i + 1 < len(argv):
+            user_C = Path(argv[i+1]).expanduser().resolve()
+            i += 2
+            continue
+        args.append(a)
+        i += 1
+
+    # Determine build dir
+    build_dir = (user_C or (cwd if (cwd / "build.ninja").is_file() else (cwd / "build"))).resolve()
+
+    # Read -S and -B used by CMake regeneration
+    s_path, b_path = read_SB_from_build_ninja(build_dir)
+
+    # Fallbacks if not yet generated
+    if not s_path or not b_path:
+        # assume standard layout: source = build_dir.parent, binary = build_dir
+        src_root_host = build_dir.parent
+        bin_dir_container = f"{CONTAINER_MOUNT}/build"
+    else:
+        # We expect b_path to look like /host/build (container path).
+        # Map container /host/build  -> host build_dir
+        # Thus container /host       -> host build_dir.parent
+        if not b_path.endswith("/build"):
+            # nonstandard; still map parent
+            src_root_host = build_dir.parent
+            bin_dir_container = b_path.replace("/host", CONTAINER_MOUNT)
+        else:
+            src_root_host = build_dir.parent
+            bin_dir_container = f"{CONTAINER_MOUNT}/build"
+
+        # If CMake encoded a subdir like -S/host/something, then our /host must be host src_root_host,
+        # which should correspond to build_dir.parent. That matches the common layout.
+
+    docker_cmd = [
+        "docker","run","--rm","-it",
+        "--user", f"{os.getuid()}:{os.getgid()}",
+        "-v", f"{str(src_root_host)}:{CONTAINER_MOUNT}",
+        "-w", CONTAINER_MOUNT,  # /host == project root (must contain CMakeLists.txt)
+    ]
+    for k in ("IDF_GITHUB_ASSETS","ESPPORT","ESPBAUD","IDF_IMAGE"):
+        v = os.environ.get(k)
+        if v:
+            docker_cmd += ["-e", f"{k}={v}"]
+
+    image = os.environ.get("IDF_IMAGE", DEFAULT_IMAGE)
+
+    # Always build in /host/build so regen command -S/host -B/host/build matches
+    inner = ["ninja", "-C", bin_dir_container] + args
+
+    # Optional: silence "dubious ownership" noise for openthread submodule
+    # inner = ["bash","-lc", "git config --global --add safe.directory /opt/esp/idf/components/openthread/openthread; exec ninja -C '{}' {}"
+    #          .format(bin_dir_container.replace("'", "'\\''"), " ".join(map(lambda s: s.replace("'", "'\\''"), args)))]
+
+    # Uncomment below line to debug what we run:
+    # print("DEBUG:", " ".join(docker_cmd + [image] + inner), file=sys.stderr)
+
+    sys.exit(subprocess.call(docker_cmd + [image] + inner))
+
+if __name__ == "__main__":
+    main()
