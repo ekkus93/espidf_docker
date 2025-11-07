@@ -162,6 +162,25 @@ def main():
     if pass_devices and is_linux():
         docker_cmd += find_serial_devices()
 
+        # Add host device groups (for example `dialout`) as supplementary groups
+        # inside the container. This helps when the container process runs with
+        # the same numeric UID:GID as the host user but doesn't have the
+        # supplementary groups (so it cannot open /dev/ttyUSB* nodes).
+        try:
+            gids = set()
+            for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*"):
+                for path in glob.glob(pattern):
+                    try:
+                        gids.add(os.stat(path).st_gid)
+                    except Exception:
+                        # ignore files that vanish or stat failures
+                        pass
+            for gid in sorted(gids):
+                docker_cmd += ["--group-add", str(gid)]
+        except Exception:
+            # best-effort only; if something fails, continue without group-add
+            pass
+
     # Compose final command
     docker_cmd += [image]
     inner = raw_cmd if raw_cmd else [IDF_ENTRY] + idf_args

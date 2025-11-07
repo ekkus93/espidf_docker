@@ -1,0 +1,5 @@
+[
+  { "key": "ctrl+b", "command": "workbench.action.tasks.build" },
+  { "key": "ctrl+shift+f7", "command": "workbench.action.tasks.runTask", "args": "IDF: flash" },
+  { "key": "ctrl+shift+m", "command": "workbench.action.tasks.runTask", "args": "IDF: monitor" }
+]

@@ -1,0 +1,12 @@
+{
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "files.associations": {
+        "sdkconfig.h": "c"
+    },
+    "terminal.integrated.env.linux": {
+        // Optional: set default port/baud for tasks if you don’t want prompts
+        // "ESPPORT": "/dev/ttyUSB0",
+        // "ESPBAUD": "921600"
+    }
+}

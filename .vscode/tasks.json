@@ -1,0 +1,77 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "port",
+      "type": "promptString",
+      "description": "Serial port (Linux/WSL: /dev/ttyUSB0, macOS: /dev/tty.usbserial-XXXX)",
+      "default": "/dev/ttyUSB0"
+    },
+    {
+      "id": "baud",
+      "type": "promptString",
+      "description": "Baud rate",
+      "default": "921600"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "IDF: set-target (esp32)",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["set-target", "esp32"],
+      "group": "none",
+      "problemMatcher": []
+    },
+    {
+      "label": "IDF: menuconfig",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["menuconfig"],
+      "problemMatcher": []
+    },
+    {
+      "label": "IDF: build",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["build"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "IDF: flash",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["-p", "${input:port}", "-b", "${input:baud}", "flash"],
+      "problemMatcher": []
+    },
+    {
+      "label": "IDF: monitor",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["-p", "${input:port}", "monitor"],
+      "problemMatcher": []
+    },
+    {
+      "label": "IDF: flash+monitor",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["-p", "${input:port}", "-b", "${input:baud}", "flash", "monitor"],
+      "problemMatcher": []
+    },
+    {
+      "label": "IDF: size",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["size"],
+      "problemMatcher": []
+    },
+    {
+      "label": "IDF: fullclean",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["fullclean"],
+      "problemMatcher": []
+    }
+  ]
+}
