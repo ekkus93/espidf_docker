@@ -71,10 +71,10 @@ Some systems may have this behavior disabled and will require a manual start:
 idf.py from the command line works the same way as the normal idf.py. The first time you run it, it will pull the Espressif esp-idf docker container. This might take a while. It's about 3 gigs. After you have downloaded it the first time, you shouldn't have to download it again.
 
 The most common idf.py commands:
-fullclean - deletes build directory
-build - builds esp32 project
-flash - flashes the esp32
-monitor - connect to the esp32 via the serial port
-menuconfig - change configuration of esp32 project
-help - help menu
+- fullclean - deletes build directory
+- build - builds esp32 project
+- flash - flashes the esp32
+- monitor - connect to the esp32 via the serial port
+- menuconfig - change configuration of esp32 project
+- help - help menu
 
