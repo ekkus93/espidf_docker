@@ -29,8 +29,8 @@ function Require-Cmd([string]$Name) {
 }
 
 function Show-UsbList {
-  Write-Host ">> usbipd wsl list" -ForegroundColor Cyan
-  usbipd wsl list
+  Write-Host ">> usbipd list" -ForegroundColor Cyan
+  usbipd list
 }
 
 try {
@@ -62,15 +62,15 @@ Show-UsbList
 # 2) Choose BUSID
 $busId = $null
 if ($Auto) {
-  # Auto-pick: first "Not attached" device's BUSID
-  $lines = (usbipd wsl list) 2>$null
+  # Auto-pick: first device that appears Not shared / Not attached
+  $lines = (usbipd list) 2>$null
   foreach ($ln in $lines) {
-    if ($ln -match '^\s*(\d+-\d+)\s+.+Not\s+attached') {
+    if ($ln -match '^\s*(\d+-\d+)\s+' -and ($ln -match 'Not\s+shared' -or $ln -match 'Not\s+attached')) {
       $busId = $Matches[1]; break
     }
   }
   if (-not $busId) {
-    Write-Error "No 'Not attached' USB device found to auto-attach."
+    Write-Error "No 'Not shared' USB device found to auto-attach."
     exit 1
   }
   Write-Host "Auto-selected BUSID: $busId"
@@ -78,9 +78,42 @@ if ($Auto) {
   $busId = Read-Host "Enter BUSID to attach (e.g., 1-2)"
 }
 
-# 3) Attach to WSL
-Write-Host "Attaching BUSID $busId to '$Distro'…" -ForegroundColor Cyan
-$attach = & usbipd wsl attach --busid $busId --distribution $Distro 2>&1
+# 3) Ensure device is bound (shared) on the host then attach to WSL
+Write-Host "Preparing BUSID $busId for attach to '$Distro'…" -ForegroundColor Cyan
+
+# Check current state for the selected BUSID
+$state = $null
+$listOut = (usbipd list) 2>$null
+foreach ($ln in $listOut) {
+  if ($ln -match '^\s*('+[regex]::Escape($busId)+')\s+.+' ) {
+    if ($ln -match '\b(Not\s+shared|Not\s+attached|Attached|Shared)\b') { $state = $Matches[1] }
+    break
+  }
+}
+
+if (-not $state) { Write-Host "Warning: could not determine device state from 'usbipd list'. Proceeding to attach." -ForegroundColor Yellow }
+
+# If device is not shared/attached on the host, user must bind (requires Admin)
+if ($state -and ($state -match 'Not\s+(shared|attached)')) {
+  Write-Host "Device appears unshared on the host. A host 'bind' is required (admin)." -ForegroundColor Cyan
+  $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+  if (-not $isAdmin) {
+    Write-Host "Please run the following in an elevated PowerShell to bind the device (or re-run this script as Administrator):" -ForegroundColor Yellow
+    Write-Host "    usbipd bind --busid $busId" -ForegroundColor Green
+    Read-Host "Press Enter after you have run the bind command in an Administrator PowerShell"
+  } else {
+    Write-Host "Binding device on host (requires Admin)…" -ForegroundColor Cyan
+    $bindOut = usbipd bind --busid $busId 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "usbipd bind failed:`n$bindOut"
+      exit 1
+    }
+  }
+}
+
+# Now attach to WSL (attach usually does not require Admin)
+Write-Host "Attaching BUSID $busId to WSL distro '$Distro'…" -ForegroundColor Cyan
+$attach = usbipd attach --wsl --busid $busId --distribution $Distro 2>&1
 if ($LASTEXITCODE -ne 0) {
   Write-Error "usbipd attach failed:`n$attach"
   exit 1
