@@ -247,17 +247,24 @@ The esp32 should be the new device that appears.
 usbipd bind --busid <busid>
 ```
 
-# 2) In a Powershell window, run:
+# 2) In a Powershell window, run (start the WSL distro)
 ```powershell
 wsl -d Ubuntu
 ```
-You see this:
-```
-PS C:\espidf_docker>  wsl -d Ubuntu 
+You will see a short Ubuntu login hint such as:
+```text
 To run a command as administrator (user "root"), use "sudo <command>".
 See "man sudo_root" for details.
 ```
-this is not an error. It just means that you're logged into Ubuntu. This Powershell window needs to stay open to keep Ubuntu running.
+This is not an error — it means Ubuntu started and presented its normal login hint. You do NOT need to run `wsl -d Ubuntu` from an elevated Windows PowerShell.
+
+If you prefer to start the distro and keep it running in the background (so you don't need to keep an interactive shell open), run:
+
+```powershell
+Start-Process wsl -ArgumentList '-d Ubuntu -- bash -c "sleep infinity"'
+```
+
+That leaves the WSL distro in the `Running` state until you stop it.
 
 # 3) Open a new Powershell window (no Admin required. Attach the device to WSL). Ensure a WSL shell is open first.
 ```powershell
@@ -353,7 +360,7 @@ setx PATH ("$([Environment]::GetEnvironmentVariable('PATH','User'));$add")
 ```
 
 Map USB serial device into WSL (`Set-Esp32Port.ps1`)
-- Open PowerShell as Administrator (required for `usbipd` attach).
+- **Bind (host share) requires Administrator**: binding a device on the Windows host uses `usbipd bind --busid <busid>` and must be run from an elevated PowerShell session. Attaching the already-bound device into WSL (`usbipd attach --wsl ...`) normally does not require Administrator but does require a running WSL2 distro.
 - Change to the tools folder and run the helper:
 
 ```powershell
@@ -371,7 +378,7 @@ cd C:\\espidf_docker\\esp-idf\\tools
 
 Notes:
 
-- The script calls `usbipd wsl attach` to attach the chosen USB device to the WSL distro and then detects the resulting `/dev/ttyUSB*` or `/dev/ttyACM*` inside WSL.
+- The helper will run the modern `usbipd` commands to attach the chosen USB device into WSL and then detects the resulting `/dev/ttyUSB*` or `/dev/ttyACM*` inside WSL. If your system is running an older `usbipd` that still exposes `wsl` subcommands, update `usbipd` or run the equivalent modern commands listed above.
 - Without `-Persist` the script sets `$env:ESPPORT` for the current PowerShell session only. With `-Persist` it stores `ESPPORT` in your user environment (reopen shells to pick it up).
 
 Run ESP-IDF commands from PowerShell (`idf.ps1`)
