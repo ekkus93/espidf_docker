@@ -3,7 +3,7 @@
 
 
 ## Install
-
+### Linux
 1. Put this repo in /opt
 2. Set path at the end of .bashrc:
 ```bash
@@ -76,7 +76,7 @@ The most common idf.py commands:
 - menuconfig - change configuration of esp32 project
 - help - help menu
 
-## Windows (PowerShell)
+### Windows (PowerShell)
 
 This repository includes PowerShell helpers to run ESP-IDF via WSL2 + Docker Desktop and to attach USB serial devices to WSL. The short flow is:
 
@@ -123,15 +123,7 @@ Install Docker Desktop (WSL integration)
 
 Install Docker Desktop (recommended) and enable WSL integration:
 
-- Using winget (run in Windows PowerShell):
-
-Run the `winget` command in a Windows PowerShell session (preferably elevated / "Run as Administrator"). Do not run this command inside the Ubuntu WSL shell — it installs Docker Desktop on Windows, not inside WSL.
-
-```powershell
-winget install --id=Docker.DockerDesktop -e
-```
-
-- Or download Docker Desktop from https://www.docker.com/get-started and run the installer.
+Download Docker Desktop from https://www.docker.com/get-started and run the installer.
 
 After installing Docker Desktop:
 
@@ -215,129 +207,6 @@ Notes:
 - Docker Desktop requires a recent Windows 10/11 build. If you prefer not to use Docker Desktop, install Docker Engine inside your WSL distro directly following the distro's Docker install docs.
 - Ensure your WSL distro is selected in Docker Desktop's WSL Integration settings so `docker` is available inside WSL shells.
 
-### Install usbipd
-- Manually (download MSI):
-	1. Visit https://github.com/dorssel/usbipd-win/releases
-	2. Download the latest `usbipd-win-<version>.msi` and run the installer.
-
-Reboot Windows.
-
-# show help
-```powershell
-usbipd --help
-```
-
-# list USB devices attached to Windows and their bus IDs (copy the busid you want)
-```powershell
-usbipd list
-```
-
-Most likely, the esp32 will show up as "USB-Enhanced-SERIAL CH343". If you are unsure which device it is, do this without the esp32 plugged in:
-```powershell
-usbipd list
-```
-then plug in the esp32 and do this again:
-```powershell
-usbipd list
-```
-The esp32 should be the new device that appears.
-
- # 1) Bind (share) the device so it can be attached to WSL — requires Administrator
-```powershell 
-usbipd bind --busid <busid>
-```
-
-# 2) In a Powershell window, run (start the WSL distro)
-```powershell
-wsl -d Ubuntu
-```
-You will see a short Ubuntu login hint such as:
-```text
-To run a command as administrator (user "root"), use "sudo <command>".
-See "man sudo_root" for details.
-```
-This is not an error — it means Ubuntu started and presented its normal login hint. You do NOT need to run `wsl -d Ubuntu` from an elevated Windows PowerShell.
-
-If you prefer to start the distro and keep it running in the background (so you don't need to keep an interactive shell open), run:
-
-```powershell
-Start-Process wsl -ArgumentList '-d Ubuntu -- bash -c "sleep infinity"'
-```
-
-That leaves the WSL distro in the `Running` state until you stop it.
-
-# 3) Open a new Powershell window (no Admin required. Attach the device to WSL). Ensure a WSL shell is open first.
-```powershell
-usbipd attach --wsl --busid <busid>
-```
-
-You should see something like this:
-```powershell
-PS C:\espidf_docker> usbipd attach --wsl --busid 1-3
-usbipd: info: Using WSL distribution 'Ubuntu' to attach; the device will be available in all WSL 2 distributions.
-usbipd: info: Loading vhci_hcd module.
-usbipd: info: Detected networking mode 'nat'.
-usbipd: info: Using IP address 172.21.224.1 to reach the host.
-```
-
-# 4) Verify the device is attached (shows in the list)
-```powershell
-usbipd list
-```
-
-You should see something like this:
-```powershell
-PS C:\espidf_docker> usbipd list
-Connected:
-BUSID  VID:PID    DEVICE                                                        STATE
-1-1    413c:2113  USB Input Device                                              Not shared
-1-2    0000:3825  USB Input Device                                              Not shared
-1-3    1a86:55d3  USB-Enhanced-SERIAL CH343 (COM3)                              Attached
-2-2    0484:5750  USB Input Device                                              Not shared
-2-3    8087:0029  Intel(R) Wireless Bluetooth(R)                                Not shared
-4-1    057e:0000  BillBoard, USB Serial Device (COM4)                           Not shared
-```
-Your esp32 device should be in the "Attached" state.
-
-# 4) When finished, detach the device
-usbipd detach --busid <busid>
-
-# list devices and attach state (used by Set-Esp32Port.ps1)
-usbipd list
-```
-
-You should see something like this:
-```
-PS C:\espidf_docker> usbipd list    
-Connected:
-BUSID  VID:PID    DEVICE                                                        STATE
-1-1    413c:2113  USB Input Device                                              Not shared
-1-2    0000:3825  USB Input Device                                              Not shared
-1-3    1a86:55d3  USB-Enhanced-SERIAL CH343 (COM3)                              Shared
-2-2    0484:5750  USB Input Device                                              Not shared
-2-3    8087:0029  Intel(R) Wireless Bluetooth(R)                                Not shared
-4-1    057e:0000  BillBoard, USB Serial Device (COM4)                           Not shared
-
-Persisted:
-GUID                                  DEVICE
-```
-
-Common attach/detach commands:
-
-```powershell
-# attach busid 1-2 to the Ubuntu WSL distro (Admin required)
-usbipd attach --wsl --busid 1-3
-
-# detach
-usbipd detach --busid 1-3
-```
-
-Notes:
-
-- Attaching requires an elevated PowerShell session (Run as Administrator).
-- After attach, allow a moment for the device to enumerate in WSL; then run `Set-Esp32Port.ps1` to detect and export the WSL device path.
-- If winget or choco isn't available, use the MSI from the GitHub releases page.
-
 Set up PowerShell environment (session)
 Open PowerShell and run (session-only, effective immediately):
 
@@ -359,39 +228,87 @@ $add = "C:\\espidf_docker\\esp-idf\\tools;C:\\espidf_docker\\esp-idf\\components
 setx PATH ("$([Environment]::GetEnvironmentVariable('PATH','User'));$add")
 ```
 
-Map USB serial device into WSL (`Set-Esp32Port.ps1`)
-- **Bind (host share) requires Administrator**: binding a device on the Windows host uses `usbipd bind --busid <busid>` and must be run from an elevated PowerShell session. Attaching the already-bound device into WSL (`usbipd attach --wsl ...`) normally does not require Administrator but does require a running WSL2 distro.
-- Change to the tools folder and run the helper:
+### Install usbipd
 
+- Install usbipd on Windows (MSI):
+  1. Visit https://github.com/dorssel/usbipd-win/releases
+  2. Download the latest `usbipd-win-<version>.msi` and run the installer.
+
+Reboot Windows after installing.
+
+The `Set-Esp32Port.ps1` helper is the simplest and recommended approach — it handles detection, prompts, and sets `ESPPORT` for you.
+
+Run as Adminstrator in Powershell:
 ```powershell
-cd C:\\espidf_docker\\esp-idf\\tools
-
-# Interactive: pick device and attach to Ubuntu (default)
-.\Set-Esp32Port.ps1
-
-# Auto-attach first available not-attached device and persist ESPPORT to user env
-.\Set-Esp32Port.ps1 -Distro Ubuntu -Auto -Persist
-
-# If you already know the WSL device path (skip detect)
-.\Set-Esp32Port.ps1 -Port /dev/ttyUSB0 -Persist
+cd C:/espidf_docker/esp-idf/tools
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-Esp32Port.ps1 -Distro Ubuntu
 ```
 
-Notes:
+You should see something like this if it was successful:
+```powershell
+PS C:\espidf_docker\esp-idf\tools> powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-Esp32Port.ps1 -Distro Ubuntu
+>> usbipd list
+Connected:
+BUSID  VID:PID    DEVICE                                                        STATE
+1-1    413c:2113  USB Input Device                                              Not shared
+1-2    0000:3825  USB Input Device                                              Not shared
+1-3    1a86:55d3  USB-Enhanced-SERIAL CH343 (COM3)                              Shared
+2-2    0484:5750  USB Input Device                                              Not shared
+2-3    8087:0029  Intel(R) Wireless Bluetooth(R)                                Not shared
+4-1    057e:0000  BillBoard, USB Serial Device (COM4)                           Not shared
 
-- The helper will run the modern `usbipd` commands to attach the chosen USB device into WSL and then detects the resulting `/dev/ttyUSB*` or `/dev/ttyACM*` inside WSL. If your system is running an older `usbipd` that still exposes `wsl` subcommands, update `usbipd` or run the equivalent modern commands listed above.
-- Without `-Persist` the script sets `$env:ESPPORT` for the current PowerShell session only. With `-Persist` it stores `ESPPORT` in your user environment (reopen shells to pick it up).
+Persisted:
+GUID                                  DEVICE
 
+Enter BUSID to attach (e.g., 1-2): 1-3
+Preparing BUSID 1-3 for attach to 'Ubuntu'...
+Attaching BUSID 1-3 to WSL distro 'Ubuntu'...
+Detected serial device: /dev/ttyACM0
+USB serial device mapped to /dev/ttyACM0 (ESPPORT)
+Example: idf.ps1 -p /dev/ttyACM0 flash
+Example: idf.ps1 -p /dev/ttyACM0 monitor
+```
+
+If you are unsure which device you should use, do the following:
+```powershell
+cd C:/espidf_docker/esp-idf/tools
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Find-Esp32Usb.ps1
+```
+You should see something like this:
+PS C:\espidf_docker\esp-idf\tools> powershell -NoProfile -ExecutionPolicy Bypass -File .\Find-Esp32Usb.ps1
+Unplug the ESP32 USB cable, then press Enter to continue.
+
+Captured 5 currently connected device(s).
+Now plug in the ESP32, wait for it to enumerate, then press Enter.
+
+Captured 6 device(s) after reconnect.
+New USB device(s) detected:
+  BusId: 1-3
+  VID:PID: 303a:1001
+  Description: USB Serial Device (COM5), USB JTAG/serial debug unit
+  State: Not shared
+
+You can now use the detected BusId with Set-Esp32Port.ps1 or usbipd attach.
+
+#### idf
 Run ESP-IDF commands from PowerShell (`idf.ps1`)
 - `idf.ps1` wraps `idf.py` and runs everything inside your chosen WSL distro's Docker environment.
+
+Update security in Powershell to run scripts:
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
 
 Examples (run from your ESP project folder):
 
 ```powershell
-# run build
-C:\\espidf_docker\\esp-idf\\tools\\idf.ps1 build
+# In the top level of your esp32 project, run build
+```powershell
+idf.ps1 build
+```
 
 # flash using the device chosen by Set-Esp32Port.ps1
-C:\\espidf_docker\\esp-idf\\tools\\idf.ps1 -p $env:ESPPORT -b 921600 flash
+idf.ps1 -p $env:ESPPORT -b 921600 flash
 
 # open monitor
 C:\\espidf_docker\\esp-idf\\tools\\idf.ps1 -p $env:ESPPORT monitor
