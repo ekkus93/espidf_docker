@@ -139,6 +139,10 @@ docker version
 docker run --rm hello-world
 ```
 
+***Make sure that Docker Desktop automatcially runs on startup***
+In Docker Desktop, go to "Settings" and under General, check "tart Docker Desktop when you sign in to your computer".
+
+
 **Troubleshooting Docker Desktop on Windows**
 
 If you see an error like:
