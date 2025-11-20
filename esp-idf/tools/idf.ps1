@@ -22,47 +22,10 @@ param(
 
 function Test-Command($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
-function Get-WslUnixTime([string]$distro) {
-  try {
-    $output = & wsl.exe -d $distro -- bash -lc "date +%s"
-    if ($LASTEXITCODE -ne 0) { return $null }
-    return [long]($output.Trim())
-  } catch {
-    return $null
-  }
-}
-
-function Sync-WslClock([string]$distro, [int]$thresholdSeconds = 2) {
-  $wslTime = Get-WslUnixTime $distro
-  if ($null -eq $wslTime) { return }
-
-  $winTime = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  $skew = [Math]::Abs($winTime - $wslTime)
-  if ($skew -le $thresholdSeconds) { return }
-
-  Write-Host "WSL clock skew detected (~${skew}s); restarting WSL for resync..." -ForegroundColor Yellow
-  & wsl.exe --shutdown | Out-Null
-  Start-Sleep -Seconds 2
-
-  $wslTime = Get-WslUnixTime $distro
-  if ($null -eq $wslTime) {
-    Write-Warning "Unable to verify WSL clock after restart; continuing anyway."
-    return
-  }
-
-  $winTime = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-  $skew = [Math]::Abs($winTime - $wslTime)
-  if ($skew -gt $thresholdSeconds) {
-    Write-Warning "WSL clock still differs by ~${skew}s; manual sync may be required."
-  }
-}
-
 if (-not (Test-Command wsl.exe)) {
   Write-Error "WSL2 is required. Install WSL (wsl.exe) and try again."
   exit 1
 }
-
-Sync-WslClock $Distro
 
 # Convert Windows path (e.g., C:\foo\bar) to WSL (/mnt/c/foo/bar)
 function Convert-ToWslPath([string]$winPath) {
