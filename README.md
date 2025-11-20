@@ -135,6 +135,9 @@ Recommended startup behavior
 - Enable Docker Desktop autostart: in Docker Desktop -> Settings -> General, turn on **Start Docker Desktop when you log in** so the Docker engine and `docker-desktop` integration are available automatically.
 - Start your Ubuntu WSL distro manually when you need to attach USB devices (recommended): open the **Ubuntu** app or run `wsl -d Ubuntu` and keep that shell open while you run `usbipd attach` and use the device. This avoids keeping WSL running all the time while still allowing `usbipd attach` to work. 
 
+How to start Ubuntu WSL
+
+- **From the Start menu**: press the Windows key, type `Ubuntu`, and press Enter. A terminal window opens inside your Ubuntu distro—leave it running while you work with `usbipd attach`.
 
 Verify inside WSL (open an Ubuntu WSL shell):
 
@@ -244,6 +247,27 @@ cd C:/espidf_docker/esp-idf/tools
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-Esp32Port.ps1 -Distro Ubuntu
 ```
 
+If you are unsure which device you should use, do the following:
+```powershell
+cd C:/espidf_docker/esp-idf/tools
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Find-Esp32Usb.ps1
+```
+You should see something like this:
+PS C:\espidf_docker\esp-idf\tools> powershell -NoProfile -ExecutionPolicy Bypass -File .\Find-Esp32Usb.ps1
+Unplug the ESP32 USB cable, then press Enter to continue.
+
+Captured 5 currently connected device(s).
+Now plug in the ESP32, wait for it to enumerate, then press Enter.
+
+Captured 6 device(s) after reconnect.
+New USB device(s) detected:
+  BusId: 1-3
+  VID:PID: 303a:1001
+  Description: USB Serial Device (COM5), USB JTAG/serial debug unit
+  State: Not shared
+
+You can now use the detected BusId with Set-Esp32Port.ps1 or usbipd attach.
+
 You should see something like this if it was successful:
 ```powershell
 PS C:\espidf_docker\esp-idf\tools> powershell -NoProfile -ExecutionPolicy Bypass -File .\Set-Esp32Port.ps1 -Distro Ubuntu
@@ -268,27 +292,6 @@ USB serial device mapped to /dev/ttyACM0 (ESPPORT)
 Example: idf.ps1 -p /dev/ttyACM0 flash
 Example: idf.ps1 -p /dev/ttyACM0 monitor
 ```
-
-If you are unsure which device you should use, do the following:
-```powershell
-cd C:/espidf_docker/esp-idf/tools
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Find-Esp32Usb.ps1
-```
-You should see something like this:
-PS C:\espidf_docker\esp-idf\tools> powershell -NoProfile -ExecutionPolicy Bypass -File .\Find-Esp32Usb.ps1
-Unplug the ESP32 USB cable, then press Enter to continue.
-
-Captured 5 currently connected device(s).
-Now plug in the ESP32, wait for it to enumerate, then press Enter.
-
-Captured 6 device(s) after reconnect.
-New USB device(s) detected:
-  BusId: 1-3
-  VID:PID: 303a:1001
-  Description: USB Serial Device (COM5), USB JTAG/serial debug unit
-  State: Not shared
-
-You can now use the detected BusId with Set-Esp32Port.ps1 or usbipd attach.
 
 #### idf
 Run ESP-IDF commands from PowerShell (`idf.ps1`)

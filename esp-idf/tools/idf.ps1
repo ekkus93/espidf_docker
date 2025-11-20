@@ -78,8 +78,112 @@ function Convert-ToWslPath([string]$winPath) {
 # Quote for safe bash usage
 function Escape-ForBash([string]$s) { return "'" + ($s -replace "'", "'\''") + "'" }
 
+function Get-SerialPortFromArgs {
+  param(
+    [string[]]$Args,
+    [string]$InvocationLine
+  )
+
+  if ($args) {
+    for ($i = 0; $i -lt $args.Count; $i++) {
+      $token = $args[$i]
+      if ($token -eq '-p' -or $token -eq '--port') {
+        if ($i + 1 -lt $args.Count) { return $args[$i + 1] }
+      } elseif ($token -like '--port=*') {
+        return $token.Split('=',2)[1]
+      }
+    }
+  }
+
+  $port = [System.Environment]::GetEnvironmentVariable('ESPPORT','Process')
+  if (-not $port) { $port = [System.Environment]::GetEnvironmentVariable('ESPPORT','User') }
+
+  if (-not $port -and $InvocationLine) {
+    $patterns = @(
+      '(?<!\S)(?:-p|--port)(?:\s+|=)"([^\"]+)"',
+      "(?<!\S)(?:-p|--port)(?:\s+|=)'([^']+)'",
+      '(?<!\S)(?:-p|--port)(?:\s+|=)([^\s]+)'
+    )
+
+    foreach ($pattern in $patterns) {
+      $match = [System.Text.RegularExpressions.Regex]::Match($InvocationLine, $pattern)
+      if ($match.Success) {
+        for ($g = 1; $g -lt $match.Groups.Count; $g++) {
+          if ($match.Groups[$g].Success -and $match.Groups[$g].Value) {
+            return $match.Groups[$g].Value
+          }
+        }
+      }
+    }
+  }
+
+  return $port
+}
+
+function Test-WslDialoutMembership([string]$distro) {
+  $script = "if id -nG | tr ' ' '\n' | grep -Fxq dialout; then exit 0; else exit 1; fi"
+  & wsl.exe -d $distro -- bash -lc $script | Out-Null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Test-WslSerialAccess([string]$distro, [string]$port) {
+  $portArg = Escape-ForBash $port
+  $script = "if [ ! -e $portArg ]; then exit 2; fi; if [ ! -w $portArg ] || [ ! -r $portArg ]; then exit 3; fi"
+  & wsl.exe -d $distro -- bash -lc $script | Out-Null
+  return $LASTEXITCODE
+}
+
+function Ensure-SerialPermissions {
+  param(
+    [string]$Distro,
+    [string]$Port
+  )
+
+  if (-not (Test-WslDialoutMembership $Distro)) {
+    Write-Error "Serial access requires your $Distro user to be in the 'dialout' group. Run 'wsl.exe -d $Distro -- sudo usermod -aG dialout $USER', restart WSL, and try again."
+    exit 1
+  }
+
+  if ($Port -and $Port -like '/dev/*') {
+    $result = Test-WslSerialAccess $Distro $Port
+    switch ($result) {
+      0 { return }
+      2 {
+        Write-Error "Serial port '$Port' was not found inside $Distro. Attach the ESP32 via usbipd/WSL and retry."
+        exit 1
+      }
+      3 {
+        Write-Error "Serial port '$Port' exists but is not readable/writable by your $Distro user. Reattach the device or run 'sudo chgrp dialout $Port && sudo chmod 660 $Port' inside $Distro, then retry."
+        exit 1
+      }
+      default {
+        Write-Warning "Unable to verify serial permissions for '$Port' (exit code $result); continuing."
+      }
+    }
+  } elseif ($Port) {
+    Write-Warning "Serial port '$Port' does not look like a Linux /dev path; skipping permission preflight."
+  } else {
+    Write-Warning "Flash/monitor requested but no serial port was specified. Use '-p /dev/ttyACMx' or set ESPPORT to enable permission preflight."
+  }
+}
+
 $pwdWin = (Get-Location).Path
 $pwdWsl = Convert-ToWslPath $pwdWin
+
+$serialCommands = @('flash','monitor','flash+monitor')
+$needsSerial = $false
+foreach ($arg in $IdfArgs) {
+  if ($serialCommands -contains $arg) {
+    $needsSerial = $true
+    break
+  }
+}
+
+$serialPort = $null
+if ($needsSerial) {
+  $serialPort = Get-SerialPortFromArgs -Args $IdfArgs -InvocationLine $MyInvocation.Line
+  Ensure-SerialPermissions -Distro $Distro -Port $serialPort
+}
 
 # ----- Patch (option 1): env prelude -----
 # Collect *Windows* env vars we want visible inside WSL before running Docker.
@@ -133,9 +237,13 @@ ENV_ARGS+=(-e GIT_CONFIG_VALUE_0=/opt/esp/idf)
 ENV_ARGS+=(-e GIT_CONFIG_KEY_1=safe.directory)
 ENV_ARGS+=(-e GIT_CONFIG_VALUE_1=/opt/esp/idf/components/openthread/openthread)
 
+GROUP_ARGS=()
+__GROUP_SETUP__
+
 # Run idf.py inside Docker (in WSL)
 exec docker run --rm -it \
   $USER_ARG \
+  "${GROUP_ARGS[@]}" \
   "${ENV_ARGS[@]}" \
   -v "$PWD":/workspace \
   -w /workspace \
@@ -148,7 +256,15 @@ $bash = $bashTemplate.Replace('{ENV_PRELUDE}', $envPrelude)
 $bash = $bash.Replace('{PWD_ESC}', $pwdEsc)
 $bash = $bash.Replace('{IMG_ESC}', $imgEsc)
 $bash = $bash.Replace('{ARG_LIST}', $argList)
+$groupLine = ''
+if ($needsSerial) { $groupLine = '  --group-add dialout \'+[Environment]::NewLine }
+$bash = $bash.Replace('__GROUP_LINE__', $groupLine)
+$groupSetup = ''
+if ($needsSerial) { $groupSetup = "GROUP_ARGS+=(--group-add dialout)`n" }
+$bash = $bash.Replace('__GROUP_SETUP__', $groupSetup)
 $bash = $bash -replace "`r", ""
+
+# Debug dump to help diagnose wrapper issues
 
 $tempScript = [System.IO.Path]::GetTempFileName()
 $exitCode = 1
